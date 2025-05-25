@@ -80,6 +80,7 @@ Edit
 ndvi-deforestation-detector/
 
 │
+
 ├── app.py                 # Main Flask application
 
 └──README.md               # Project documentation
