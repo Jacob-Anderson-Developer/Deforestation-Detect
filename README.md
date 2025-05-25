@@ -2,9 +2,11 @@
 This Python script can be run manuall or automatically to detect deforestation
 
 🌳 NDVI Deforestation Detector
+
 A Flask-based web application that helps users detect deforestation by analyzing changes in NDVI (Normalized Difference Vegetation Index) using Google Earth Engine's Sentinel-2 satellite imagery. Users can select a geographic area and receive a downloadable GeoJSON file marking regions of potential deforestation.
 
 📸 Features
+
 📍 Enter bounding box coordinates to define an area of interest (AOI).
 
 🛰️ Fetch Sentinel-2 NDVI imagery before and after a 3-month window.
@@ -18,6 +20,7 @@ A Flask-based web application that helps users detect deforestation by analyzing
 🧠 Placeholder for Watson integration (future functionality).
 
 💡 How It Works
+
 The user enters minimum and maximum latitude/longitude values via the web form.
 
 The app queries Sentinel-2 SR imagery through Google Earth Engine using the specified bounding box and timeframe.
@@ -33,6 +36,7 @@ Areas with an NDVI decrease of more than 0.2 are flagged as potential deforestat
 These areas are converted to vector format and returned as a GeoJSON file.
 
 🚀 Getting Started
+
 Prerequisites
 Python 3.8+
 
@@ -86,6 +90,7 @@ Endpoint	Method	Description
 /send_to_watson	POST	Placeholder for future Watson integration
 
 🛑 Disclaimer
+
 This project is for educational purposes only and not suitable for real-time deforestation enforcement or precision land use analytics.
 
 📃 License
