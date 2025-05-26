@@ -5,17 +5,29 @@ from datetime import datetime, timedelta, timezone
 import io
 import smtplib
 from email.message import EmailMessage
+import os
+import requests
+import logging
+import mimetypes
+from email.utils import make_msgid
+
+# Setup logging
+logging.basicConfig(
+    filename='app.log',
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 app = Flask(__name__)
 
+# HTML Interface
 @app.route('/')
 def home():
-    return render_template_string("""
-    <!DOCTYPE html>
+    return render_template_string("""<!DOCTYPE html>
     <html>
-    <head>
-        <title>NDVI Deforestation Detector</title>
-        <style>
+    <head><title>NDVI Deforestation Detector</title></head>
+                                          <style>
             /* Reset and base */
             * {
                 box-sizing: border-box;
@@ -105,111 +117,72 @@ def home():
                 box-shadow: 0 3px 6px #0066cccc;
             }
         </style>
-    </head>
     <body>
         <h1>Detect Deforestation with NDVI</h1>
-        <p>Enter coordinates for your area of interest:</p>
-        <form id="coordsForm" autocomplete="on" spellcheck="false">
-            <table>
-                <tr>
-                    <td><label for="min_lon">Min Longitude:</label></td>
-                    <td><input type="text" id="min_lon" name="min_lon" required placeholder="-60.0"></td>
-                </tr>
-                <tr>
-                    <td><label for="min_lat">Min Latitude:</label></td>
-                    <td><input type="text" id="min_lat" name="min_lat" required placeholder="-3.0"></td>
-                </tr>
-                <tr>
-                    <td><label for="max_lon">Max Longitude:</label></td>
-                    <td><input type="text" id="max_lon" name="max_lon" required placeholder="-59.0"></td>
-                </tr>
-                <tr>
-                    <td><label for="max_lat">Max Latitude:</label></td>
-                    <td><input type="text" id="max_lat" name="max_lat" required placeholder="-2.0"></td>
-                </tr>
-            </table>
-
+        <form id="coordsForm">
+            <label>Min Longitude: <input type="text" name="min_lon" value="-111.361"></label><br>
+            <label>Min Latitude: <input type="text" name="min_lat" value="57.36"></label><br>
+            <label>Max Longitude: <input type="text" name="max_lon" value="-111.36"></label><br>
+            <label>Max Latitude: <input type="text" name="max_lat" value="57.44"></label><br>
             <button type="button" onclick="downloadGeoJSON()">Download GeoJSON</button>
             <button type="button" onclick="previewGeoJSON()">Preview on geojson.io</button>
             <button type="button" onclick="sendToWatson()">Run Watson Analysis</button>
-            <p style="color: #a0a0bf; font-size: 0.9em; margin-top: 1em;">
-            Time frame used for analysis:<br>
-            <strong>Before period:</strong> 3 months to 7 days ago<br>
-            <strong>After period:</strong> Last 7 days
-            </p>                      
         </form>
-
         <script>
             function getFormParams() {
                 const form = document.getElementById('coordsForm');
                 const params = new URLSearchParams(new FormData(form));
                 return params.toString();
             }
-
             function downloadGeoJSON() {
-                const params = getFormParams();
-                const url = '/download_geojson?' + params;
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'deforestation.geojson';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
+                window.location.href = '/download_geojson?' + getFormParams();
             }
-
             async function previewGeoJSON() {
-                const params = getFormParams();
-                const response = await fetch('/generate_geojson?' + params);
-                if (!response.ok) {
-                    alert('Error generating GeoJSON preview');
-                    return;
-                }
+                const response = await fetch('/generate_geojson?' + getFormParams());
                 const geojson = await response.json();
                 const encoded = encodeURIComponent(JSON.stringify(geojson));
-                const previewUrl = `https://geojson.io/#data=data:application/json,${encoded}`;
-                window.open(previewUrl, '_blank');
+                window.open(`https://geojson.io/#data=data:application/json,${encoded}`);
+            }
+            async function sendToWatson() {
+              try {
+                const response = await fetch('/send_to_watson', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(Object.fromEntries(new FormData(document.getElementById('coordsForm'))))
+                });
+
+            if (!response.ok) {
+               alert('Error: ' + response.statusText);
+               return;
             }
 
-            async function sendToWatson() {
-                try {
-                    const response = await fetch('/send_to_watson', { method: 'POST' });
-                    const result = await response.json();
-                    if (response.ok) {
-                        alert(result.message);
-                    } else {
-                        alert('Error: ' + result.error);
-                    }
-                } catch (err) {
-                    alert('Network error: ' + err.message);
-                }
-            }
+        const responseData = await response.json();
+
+        // Show success alert
+        alert('Watson analysis complete. Authorities have been notified.');
+                                  
+    } catch (error) {
+        alert('Fetch error: ' + error.message);
+    }
+}
+
         </script>
     </body>
-    </html>
-    """)
+    </html>""")
 
-
+# Deforestation detection
 def get_deforestation_geojson(min_lon, min_lat, max_lon, max_lat):
-    SERVICE_ACCOUNT = 'placeholder'
-    KEY_PATH = 'placeholder'
+    SERVICE_ACCOUNT = 'Placeholder'
+    KEY_PATH = 'Placeholder'
     credentials = ee.ServiceAccountCredentials(SERVICE_ACCOUNT, KEY_PATH)
     ee.Initialize(credentials)
 
     aoi = ee.Geometry.Rectangle([min_lon, min_lat, max_lon, max_lat])
-
     today = datetime.now(timezone.utc)
     three_months_ago = today - timedelta(days=90)
     seven_days_ago = today - timedelta(days=7)
 
-    before_start = three_months_ago.strftime('%Y-%m-%d')
-    before_end = seven_days_ago.strftime('%Y-%m-%d')
-    after_start = seven_days_ago.strftime('%Y-%m-%d')
-    after_end = today.strftime('%Y-%m-%d')
-
-    SELECTED_BANDS = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12', 'SCL']
-
     def maskS2sr(image):
-        image = image.select(SELECTED_BANDS)
         scl = image.select('SCL')
         mask = scl.neq(3).And(scl.neq(8)).And(scl.neq(9)).And(scl.neq(10)).And(scl.neq(11))
         return image.updateMask(mask).divide(10000)
@@ -218,54 +191,27 @@ def get_deforestation_geojson(min_lon, min_lat, max_lon, max_lat):
         ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI')
         return image.addBands(ndvi)
 
-    before_collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-                         .filterDate(before_start, before_end)
-                         .filterBounds(aoi)
-                         .map(maskS2sr)
-                         .map(addNDVI))
+    before = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+              .filterDate(three_months_ago, seven_days_ago)
+              .filterBounds(aoi)
+              .map(maskS2sr).map(addNDVI).median().select('NDVI'))
 
-    after_collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-                        .filterDate(after_start, after_end)
-                        .filterBounds(aoi)
-                        .map(maskS2sr)
-                        .map(addNDVI))
-
-    before = before_collection.median().select('NDVI')
-    after = after_collection.median().select('NDVI')
+    after = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+             .filterDate(seven_days_ago, today)
+             .filterBounds(aoi)
+             .map(maskS2sr).map(addNDVI).median().select('NDVI'))
 
     diff = before.subtract(after).rename('NDVI_change')
     deforestation = diff.gt(0.2)
 
-    deforestation_vectors = deforestation.selfMask().reduceToVectors(
+    vectors = deforestation.selfMask().reduceToVectors(
         geometry=aoi,
         scale=10,
         geometryType='polygon',
         labelProperty='deforestation',
         maxPixels=1e10
     )
-
-    deforestation_geojson = deforestation_vectors.getInfo()
-    return deforestation_geojson
-
-
-@app.route('/download_geojson')
-def download_geojson():
-    min_lon = float(request.args.get('min_lon'))
-    min_lat = float(request.args.get('min_lat'))
-    max_lon = float(request.args.get('max_lon'))
-    max_lat = float(request.args.get('max_lat'))
-
-    try:
-        geojson = get_deforestation_geojson(min_lon, min_lat, max_lon, max_lat)
-    except Exception as e:
-        return f"Error generating GeoJSON: {e}", 500
-
-    geojson_str = json.dumps(geojson, indent=2)
-    buf = io.BytesIO()
-    buf.write(geojson_str.encode('utf-8'))
-    buf.seek(0)
-    return send_file(buf, mimetype='application/geo+json', as_attachment=True, download_name='deforestation.geojson')
-
+    return vectors.getInfo()
 
 @app.route('/generate_geojson')
 def generate_geojson():
@@ -273,121 +219,118 @@ def generate_geojson():
     min_lat = float(request.args.get('min_lat'))
     max_lon = float(request.args.get('max_lon'))
     max_lat = float(request.args.get('max_lat'))
+    geojson = get_deforestation_geojson(min_lon, min_lat, max_lon, max_lat)
+    return jsonify(geojson)
 
-    try:
-        geojson = get_deforestation_geojson(min_lon, min_lat, max_lon, max_lat)
-        return jsonify(geojson)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+@app.route('/download_geojson')
+def download_geojson():
+    min_lon = float(request.args.get('min_lon'))
+    min_lat = float(request.args.get('min_lat'))
+    max_lon = float(request.args.get('max_lon'))
+    max_lat = float(request.args.get('max_lat'))
+    geojson = get_deforestation_geojson(min_lon, min_lat, max_lon, max_lat)
+    geojson_bytes = json.dumps(geojson).encode('utf-8')
+    return send_file(io.BytesIO(geojson_bytes), download_name='deforestation.geojson', as_attachment=True, mimetype='application/json')
 
 @app.route('/send_to_watson', methods=['POST'])
 def send_to_watson():
-    SMTP_SERVER = 'placeholder'                          # Replace with your SMTP server
-    SMTP_PORT = 587                                      # Replace with your SMTP port if different
-    SMTP_USERNAME = 'placeholder'                        # Replace with your SMTP username
-    SMTP_PASSWORD = 'placeholder'                        # Replace with your SMTP password
-    TO_EMAIL = 'placeholder'                             # Replace with the recipient email
-
-    html_message = """
-    <html>
-    <body style="font-family: Arial, sans-serif; line-height: 1.6;">
-<p>Dear Canadian Environmental Oversight Authorities,</p>
-
-<p>
-  I am writing to alert you about suspected deforestation activity identified from GeoJSON data analysis, enhanced with predictive analytics and AI-driven insights, in the Alberta Tar Sands region, 
-  and to bring to your attention potential future deforestation risks predicted by our AI models.
-</p>
-
-<h3>Regional Context</h3>
-<p>
-  The Alberta Tar Sands region is a geographically significant area, characterized by vast boreal forests and diverse wildlife habitats. 
-  However, the region is also heavily impacted by industrial activities, particularly oil sands extraction, which poses significant environmental risks, including deforestation and habitat destruction.
-</p>
-
-<h3>Coordinates</h3>
-<ul>
-  <li>54.7232, -112.4556</li>
-  <li>55.1232, -111.4556</li>
-  <li>53.8232, -113.4556</li>
-</ul>
-<p>Please verify these coordinates extracted from GeoJSON data as they may indicate locations of suspected deforestation.</p>
-
-<h3>Predictive Insights</h3>
-<p>
-  Our AI-driven analysis predicts potential future deforestation hotspots based on historical data, industrial trends, and environmental conditions. 
-  The urgency of proactive monitoring cannot be overstated, as the continued destruction of boreal forests and wildlife habitats may have irreversible consequences.
-</p>
-
-<h3>Legal Analysis</h3>
-<ul>
-  <li><strong>Species at Risk Act (SARA), Section 58:</strong> Protects critical habitats.</li>
-  <li><strong>Impact Assessment Act:</strong> Requires environmental and cumulative effect assessments.</li>
-  <li><strong>Canadian Environmental Protection Act (CEPA), Section 166:</strong> Aims to prevent environmental harm.</li>
-</ul>
-
-<h3>Enforcement Gaps</h3>
-<ul>
-  <li><strong>Lack of cumulative impact assessments</strong></li>
-  <li><strong>Inadequate critical habitat protection</strong></li>
-  <li><strong>Insufficient Indigenous community consultation</strong></li>
-</ul>
-
-<h3>Policy Recommendations</h3>
-<ul>
-  <li><strong>Comprehensive cumulative impact assessments</strong></li>
-  <li><strong>Enhanced protection of critical habitats</strong></li>
-  <li><strong>Meaningful consultation with Indigenous communities respecting their rights</strong></li>
-  <li><strong>Incorporation of predictive analytics into ongoing environmental monitoring and enforcement strategies</strong></li>
-</ul>
-
-<h3>Call to Action</h3>
-<p>
-  We urge prompt investigation into the suspected deforestation activity and integration of AI-driven monitoring tools via our automated watchdog system. 
-  Stronger regulatory oversight is necessary to prevent further environmental harm while balancing ecological and economic interests.
-</p>
-
-<p><em>This message was generated using IBM Watson AI to support environmental monitoring efforts through an automated, user-configurable system designed for continuous data analysis and real-time alerting.</em></p>
-
-<p>Sincerely,<br>
-Bytes For Bark Automated System</p>
-
-<h3>Sources</h3>
-<ul>
-  <li>FRA 2020 report, Canada</li>
-  <li>Canadian Environmental Protection Act (1999)</li>
-  <li>Species at Risk Act (SARA)</li>
-  <li>Impact Assessment Act</li>
-  <li>Relevant documents from the vector index, including but not limited to:</li>
-  <ul>
-    <li>PART 9 Government Operations and Federal and Aboriginal Land</li>
-    <li>Sections 211-212 Release of Substances</li>
-    <li>Report and remedial measures (Section 212)</li>
-  </ul>
-</ul>
-
-
-    </body>
-    </html>
-    """
-
     try:
-        msg = EmailMessage()
-        msg['Subject'] = 'Environmental Watchdog Alert: Watson AI Deforestation Analysis Results'
-        msg['From'] = SMTP_USERNAME
-        msg['To'] = TO_EMAIL
-        msg.set_content("This is an HTML-formatted email. Please use an email client that supports HTML.")
-        msg.add_alternative(html_message, subtype='html')
+        data = request.get_json()
+        logging.info(f"Received data for Watson: {data}")
+        min_lon = float(data.get('min_lon'))
+        min_lat = float(data.get('min_lat'))
+        max_lon = float(data.get('max_lon'))
+        max_lat = float(data.get('max_lat'))
 
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+        geojson = get_deforestation_geojson(min_lon, min_lat, max_lon, max_lat)
+
+        url = "https://us-south.ml.cloud.ibm.com/ml/v1/deployments/cfea6c52-ae04-442f-8f94-0d196d0834ed/text/generation?version=2021-05-01"
+
+        body = {
+          "input": json.dumps(geojson),
+          "parameters": {
+            "max_new_tokens": 2000
+          }
+        }
+
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": "Bearer Placeholder"
+        }
+
+        response = requests.post(url, headers=headers, json=body)
+        response.raise_for_status()
+        watson_response = response.json()
+
+        generated_text = watson_response['results'][0]['generated_text']
+
+        # Extract coordinates from the geojson
+        coordinates = geojson['features'][0]['geometry']['coordinates'][0]  # Assuming one polygon
+        formatted_coords = '\n'.join([f"- Lon: {lon}, Lat: {lat}" for lon, lat in coordinates])
+        affected_area_text = f"Affected Coordinates:\n{formatted_coords}\n\n"
+
+        email_body = generated_text.replace("\n\nSincerely,", "")
+        email_body = email_body.replace(
+             "\n\n[Your Name]\n[Your Title]\n[Your Organization]",
+             f"\n\n{affected_area_text}Sincerely,\nBytes For Bark Automated System"
+        )
+
+        # Create Content-ID for embedded image
+        logo_cid = make_msgid(domain='example.com')
+
+        # Compose HTML email body including the embedded logo image at the bottom
+        html_body = f"""
+        <html>
+          <body>
+            <pre style="font-family: monospace;">{email_body}</pre>
+            <br>
+            <img src="cid:{logo_cid[1:-1]}" alt="Bytes For Bark Logo" style="width:150px;"/>
+          </body>
+        </html>
+        """
+
+        msg = EmailMessage()
+        msg['Subject'] = "Suspected Deforestation Alert"
+        msg['From'] = 'Placeholder'
+        msg['To'] = 'Placeholder'
+
+        # Set plain text content and add HTML alternative with embedded image
+        msg.set_content(email_body)
+        msg.add_alternative(html_body, subtype='html')
+
+        # Attach logo.png inline
+        with open('logo.png', 'rb') as img:
+            img_data = img.read()
+
+        mime_type, _ = mimetypes.guess_type('logo.png')
+        maintype, subtype = mime_type.split('/')
+
+        # Attach the image to the HTML part (which is the second payload)
+        msg.get_payload()[1].add_related(img_data, maintype=maintype, subtype=subtype, cid=logo_cid)
+
+        # SMTP configuration and send email
+        smtp_server = 'smtp.gmail.com'
+        smtp_port = 587
+        smtp_user = 'Placeholder'
+        smtp_pass = 'Placeholder'  # Use app password or env var for security
+
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.starttls()
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.login(smtp_user, smtp_pass)
             server.send_message(msg)
 
-        return jsonify({"message": "GeoJSON analysis email successfully sent."})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logging.info("Watson response received successfully and email sent.")
+        return jsonify(response.json())
 
+    except requests.RequestException as re:
+        logging.error(f"Watson API request failed: {re} - Response: {getattr(re.response, 'text', None)}")
+        return jsonify({'error': 'Watson API request failed', 'details': str(re)}), 500
+    except Exception as e:
+        logging.exception("Error in /send_to_watson route")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    logging.info("Starting Flask app")
     app.run(debug=True)
